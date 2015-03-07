@@ -3,7 +3,7 @@
 
 ofEvent <GestureEvent> GestureEvent::gestureDetected;
 
-/*************************************************************************/
+/*********************************prueba de commit****************************************/
 void ofApp::setup(){
     
     openNIDevice.setup();
