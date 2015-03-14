@@ -14,86 +14,53 @@ void ofApp::setup(){
     // setup the hand generator
     openNIDevice.addHandsGenerator();
     openNIDevice.addHandFocusGesture("Wave");
-    openNIDevice.setMaxNumHands(1);
+    openNIDevice.setMaxNumHands(2);
     openNIDevice.start();
     
     ofAddListener(openNIDevice.handEvent, this, &ofApp::handEvent);
     
-    dollar.load(ofToDataPath("gestures.txt",true));
-    showMessage("Loaded! Note that saved gestures are rotated to the optimal position!",3000);
-    ofAddListener(GestureEvent::gestureDetected, this, &ofApp::gestureDetected);
-    
-    // setup OF sound stream & Pd patch
-    int ticksPerBuffer = 8; // 8 * 64 = buffer len of 512
-    int numInputs = 1;
-    ofSoundStreamSetup(2, numInputs, this, 44100, ofxPd::blockSize()*ticksPerBuffer, 3);
-    if(!pd.init(2, numInputs, 44100, ticksPerBuffer)) {
-        OF_EXIT_APP(1);
+//    dollar.load(ofToDataPath("gestures.txt",true));
+//    showMessage("Loaded! Note that saved gestures are rotated to the optimal position!",3000);
+//    ofAddListener(GestureEvent::gestureDetected, this, &ofApp::gestureDetected);
+//    
+//    // setup OF sound stream & Pd patch
+//    int ticksPerBuffer = 8; // 8 * 64 = buffer len of 512
+//    int numInputs = 1;
+//    ofSoundStreamSetup(2, numInputs, this, 44100, ofxPd::blockSize()*ticksPerBuffer, 3);
+//    if(!pd.init(2, numInputs, 44100, ticksPerBuffer)) {
+//        OF_EXIT_APP(1);
+//    }
+//    pd.start();
+//    patch = pd.openPatch("VanillaSamplers/Exc2/Ejercicio3.pd");
+//   
+    for (int i = 0; i < 2; i++){
+        smoothPosX.push_back(new circularBuffer(5));
+        smoothPosY.push_back(new circularBuffer(5));
+        percGestAnalizer.push_back(new Analizador());
     }
-    pd.start();
-    patch = pd.openPatch("VanillaSamplers/Exc2/Ejercicio3.pd");
-   
-    gestureLineX = new circularBuffer(GESTURE_SIZE);
-    gestureLineY = new circularBuffer(GESTURE_SIZE);
-    
-    estadoActual = WELCOME;
+    ofAddListener(GestureEvent::gestureDetected, this, &ofApp::gestureDetected);
 }
 
 /*************************************************************************/
 #pragma mark - Callbacks of
 void ofApp::update(){
     openNIDevice.update();
+    for (int i = 0; i < openNIDevice.getNumTrackedHands(); i++){
+        ofxOpenNIHand & hand = openNIDevice.getTrackedHand(i);
+        ofPoint & handPosition = hand.getPosition();
+        mappedHandPos.x = ofMap(ofClamp(handPosition.x,1,KINECT_W),1,KINECT_W,1,ofGetWidth());
+        mappedHandPos.y = ofMap(ofClamp(handPosition.y,1,KINECT_H),1,KINECT_H,1,ofGetHeight());
+        smoothPosX[i]->write(mappedHandPos.x);
+        smoothPosY[i]->write(mappedHandPos.y);
+    }
+    
     if (showText){
-        if (ofGetElapsedTimeMillis() >= hide_message_on){
+        if(ofGetElapsedTimeMillis() >= hide_message_on){
             showText = false;
-            found_gesture.clear();
         }
     }
     else{
-        for (int i = 0; i < openNIDevice.getNumTrackedHands(); i++){
-            ofxOpenNIHand & hand = openNIDevice.getTrackedHand(i);
-            ofPoint & handPosition = hand.getPosition();
-            mappedHandPos.x = ofMap(ofClamp(handPosition.x,1,KINECT_W),1,KINECT_W,1,ofGetWidth());
-            mappedHandPos.y = ofMap(ofClamp(handPosition.y,1,KINECT_H),1,KINECT_H,1,ofGetHeight());
-            ofSetColor(255,0,0);
-            ofRect(mappedHandPos.x, mappedHandPos.y, 5, 5);
-        }
-        
-        gestureLineX->write(mappedHandPos.x);
-        gestureLineY->write(mappedHandPos.y);
         findGesture();
-    }
-    
-    if(waiting){
-        if (ofGetElapsedTimeMillis() >= timeToCount){
-            waiting = false;
-        }
-    }else{
-        switch (estadoActual) {
-            case WELCOME:
-                pd.sendBang(patch.dollarZeroStr()+"-start");
-                countTime(24000);
-                break;
-                
-            case CIRCLE:
-                pd.sendBang(patch.dollarZeroStr()+"-circle");
-                countTime(14000);
-                break;
-                
-            case TRIANGLE:
-                pd.sendBang(patch.dollarZeroStr()+"-triangle");
-                countTime(14000);
-                break;
-                
-            case SQUARE:
-                pd.sendBang(patch.dollarZeroStr()+"-rectangle");
-                countTime(2000);
-                estadoActual=WELCOME;
-                break;
-                
-            default:
-                break;
-        }
     }
 }
 
@@ -107,43 +74,25 @@ void ofApp::draw(){
         ofSetColor(255, 0, 140);
         ofDrawBitmapString(message, 10, 30);
     }else{
-        ofSetColor(255, 255, 0);
-        line.draw();
+        for (int i = 0; i < openNIDevice.getNumTrackedHands(); i++){
+            ofSetColor(255,0,0);
+            ofRect(smoothPosX[i]->mean(), smoothPosY[i]->mean(), 20, 20);
+        }
     }
-    
-    ofSetColor(0, 255, 140);
-    found_gesture.draw();
 }
 
-
+/*************************************************************************/
+#pragma mark - Funciones
+/*************************************************************************/
 void ofApp::findGesture(){
-    ofxGesture* tmp = new ofxGesture();
-    line.clear();
-    for(int i=gestureLineX->pW;i>gestureLineX->pW-GESTURE_SIZE;i--){
-        tmp->addPoint (gestureLineX->buffer[i%GESTURE_SIZE],gestureLineY->buffer[i%GESTURE_SIZE]);
-        line.addVertex(ofVec2f(gestureLineX->buffer[i%GESTURE_SIZE],gestureLineY->buffer[i%GESTURE_SIZE]));
-    }
-
-    double score = 0.0;
-    ofxGesture* match = dollar.match(tmp, &score);
-    if(match != NULL && score>0.85) {
-        string result = "Matching score: " +ofToString(score);
-        result +=", which matches with gesture: " +match->name;
-        found_gesture.clear();
-        float dx = ofGetWidth()/2;
-        float dy = ofGetHeight()/2;
-        for(int i = 0; i < match->resampled_points.size(); ++i) {
-            found_gesture.addVertex(ofVec2f(dx+match->resampled_points[i].x, dy+match->resampled_points[i].y));
+    for (int i = 0; i < 2; i++){
+        if (percGestAnalizer[i]->calcularTodo(smoothPosY[i]->mean()) == "hit" ){
+            static GestureEvent detected;
+            detected.message = "PercHit" +  ofToString(i);
+            ofNotifyEvent(GestureEvent::gestureDetected, detected);
+            showMessage( detected.message , 50 );
         }
-        gestureLineX->resetAtPoint(mappedHandPos.x);
-        gestureLineY->resetAtPoint(mappedHandPos.y);
-        line.clear();
-        static GestureEvent detected;
-        detected.message = match->name;
-        ofNotifyEvent(GestureEvent::gestureDetected, detected);
-        showMessage(result, 500);
     }
-    delete tmp;
 }
 
 /*************************************************************************/
@@ -166,27 +115,22 @@ void ofApp::countTime(int nDelay) {
     timeToCount = ofGetElapsedTimeMillis() + nDelay;
 }
 
+/*************************************************************************/
 void ofApp::countTimeReset() {
     waiting = false ;
     timeToCount = 0;
 }
+
+/*************************************************************************/
 #pragma mark - Eventos
+/*************************************************************************/
 void ofApp::gestureDetected(GestureEvent &e){
     ofLogNotice() << "Evento de deteccion de un " << e.message << " como gesto";
-    if (e.message=="circulo" && estadoActual==WELCOME){
-        pd.sendBang(patch.dollarZeroStr()+"-stopAll");
-        estadoActual=CIRCLE;
-        countTimeReset();
+    if (e.message=="PercHit0"){
+        
     }
-    if (e.message=="triangulo" && estadoActual==CIRCLE){
-        pd.sendBang(patch.dollarZeroStr()+"-stopAll");
-        estadoActual=TRIANGLE;
-        countTimeReset();
-    }
-    if (e.message=="cuadrado" && estadoActual==TRIANGLE){
-        pd.sendBang(patch.dollarZeroStr()+"-stopAll");
-        estadoActual=SQUARE;
-        countTimeReset();
+    else if (e.message=="PercHit1"){
+    
     }
 }
 

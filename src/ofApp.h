@@ -4,6 +4,7 @@
 #include "ofxOpenNI.h"
 #include "ofxOneDollar.h"
 #include "circularBuffer.h"
+#include "analizador.h"
 #include "ofxPd.h"
 
 using namespace pd;
@@ -42,9 +43,6 @@ class ofApp : public ofBaseApp{
         void countTime(int nDelay);
         void countTimeReset();
         void findGesture();
-/*! Callback registered to Gesture Event called with ofNotify(GestureEvent &e)
- \param A configured gesture with a message specifying its type.
- */
         void gestureDetected(GestureEvent &e);
     
     private:
@@ -67,4 +65,10 @@ class ofApp : public ofBaseApp{
         State           estadoActual;
         int             timeToCount;
         bool            waiting=false;
+    
+        vector<circularBuffer*> smoothPosX;
+        vector<circularBuffer*> smoothPosY;
+    
+        vector<Analizador*>     percGestAnalizer;
+    
 };
